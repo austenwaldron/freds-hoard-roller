@@ -390,16 +390,27 @@ function toggleExclude(i){ const row=$('masterList').querySelector(`.row[data-i=
   b.title = off?'Excluded — players cannot land here. Click to include.':'Included. Click to exclude from random pulls.';
   tone(off?300:540,.05,'triangle',.05); updateExcludeNote();
 }
-function updateExcludeNote(){ const n=excluded.size;
-  $('exNote').innerHTML = n
-    ? `<b style="color:var(--ember)">${n}</b> table${n>1?'s':''} excluded from random pulls — <button class="reslink" id="exReset">reset</button>.`
-    : 'Tap a table to browse it · tap the ● at a row’s right to keep players from landing there.'; }
-$('exNote').addEventListener('click',e=>{ if(e.target.id!=='exReset')return; ac();
-  excluded.clear();
+function updateExcludeNote(){ const n=excluded.size, total=masterRows.length;
+  const allBtn = n<total ? `<button class="reslink" id="exAll">exclude all</button>` : '';
+  const resetBtn = n>0 ? `<button class="reslink" id="exReset">reset</button>` : '';
+  const sep = (allBtn&&resetBtn) ? ' · ' : '';
+  const lead = n
+    ? `<b style="color:var(--ember)">${n}</b> table${n>1?'s':''} excluded from random pulls — `
+    : 'Tap a table to browse it · tap the ● at a row’s right to keep players from landing there. ';
+  $('exNote').innerHTML = lead + resetBtn + sep + allBtn + (n?'.':''); }
+function includeAll(){ excluded.clear();
   $('masterList').querySelectorAll('.row.ex').forEach(r=>{ r.classList.remove('ex');
     const b=r.querySelector('.extog'); b.setAttribute('aria-pressed','false'); b.textContent='●';
     b.title='Included. Click to exclude from random pulls.'; });
-  updateExcludeNote(); tone(540,.05,'triangle',.05);
+  updateExcludeNote(); }
+function excludeAll(){ masterRows.forEach((m,i)=>excluded.add(i));
+  $('masterList').querySelectorAll('.row').forEach(r=>{ r.classList.add('ex');
+    const b=r.querySelector('.extog'); b.setAttribute('aria-pressed','true'); b.textContent='✕';
+    b.title='Excluded — players cannot land here. Click to include.'; });
+  updateExcludeNote(); }
+$('exNote').addEventListener('click',e=>{ if(busy)return;
+  if(e.target.id==='exReset'){ ac(); includeAll(); tone(540,.05,'triangle',.05); }
+  else if(e.target.id==='exAll'){ ac(); excludeAll(); tone(300,.05,'triangle',.05); }
 });
 function browse(mi){ const m=masterRows[mi]; browseTid=m.table;
   $('masterList').querySelectorAll('.row').forEach(x=>x.classList.remove('sel','hot','locked'));
