@@ -46,7 +46,7 @@ button{font-family:inherit;cursor:pointer}
   font-size:14px;font-style:italic;transition:opacity .4s}
 .hint b{color:var(--brass-hi);font-style:normal}
 .scene.busy .hint{opacity:0}
-.scene,.scene svg{touch-action:none;-webkit-user-select:none;user-select:none}
+.scene,.scene svg{-webkit-user-select:none;user-select:none}
 .lever{cursor:grab;touch-action:none}
 .scene.busy .lever{cursor:not-allowed;opacity:.55}
 .lever:active{cursor:grabbing}
@@ -215,7 +215,7 @@ footer{margin-top:26px;text-align:center;color:#7d6f55;font-size:13px;line-heigh
       <!-- crowbar: fulcrum at right lip (512,176) -->
       <g id="crowbarG" style="transform-origin:512px 176px">
         <g class="lever" id="lever" tabindex="0" role="button" aria-label="Pull the crowbar down to open the chest">
-          <rect x="-30" y="-300" width="740" height="700" fill="transparent"/>
+          <rect x="420" y="40" width="260" height="170" fill="transparent"/>
           <path d="M500 182 L520 168 L660 92 L672 108 L536 184 Z" fill="#7d7468" stroke="#2a251d" stroke-width="3" stroke-linejoin="round"/>
           <path d="M500 182 L478 170 L488 154 L520 168 Z" fill="#8d8478" stroke="#2a251d" stroke-width="3" stroke-linejoin="round"/>
           <circle cx="664" cy="100" r="13" fill="#8d8478" stroke="#2a251d" stroke-width="3"/>
@@ -271,6 +271,9 @@ const col = r => cs.getPropertyValue(RC[r]||'--parch-dim').trim();
 const $ = id => document.getElementById(id);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const d100 = () => 1 + Math.floor(Math.random()*100);
+const narrow = matchMedia('(max-width:780px)');
+function bringTo(el,blk='center'){ if(!narrow.matches||!el)return;
+  el.scrollIntoView({behavior:reduceMotion?'auto':'smooth',block:blk}); }
 
 /* ---------------- audio ---------------- */
 let AC=null, soundOn=true, creakOsc=null, creakGain=null;
@@ -414,6 +417,7 @@ $('subRollBtn').addEventListener('click',()=>{ if(busy||!browseTid)return; ac();
 function directRoll(tid){ busy=true; scene.classList.add('busy');
   clearMarks($('subList')); $('subList').querySelectorAll('.row.sel').forEach(x=>x.classList.remove('sel'));
   $('result').classList.remove('show'); $('tease').hidden=true;
+  bringTo($('subList').closest('.board'));
   const t=G.tables[tid], r2=d100(); $('r2v').textContent='?'; $('r1v').textContent='—'; $('r1b').textContent='';
   const ei=t.entries.findIndex(x=>x.min<=r2&&r2<=x.max);
   spin($('subList'), t.entries.length, ei, ()=>{ $('r2v').textContent=r2;
@@ -435,6 +439,7 @@ function startRoll(opts={}){
   $('r1v').textContent='?'; $('r1b').textContent='';
   browseTid=null; $('subRollBtn').hidden=true;
   $('masterList').querySelectorAll('.row.sel').forEach(x=>x.classList.remove('sel'));
+  bringTo($('masterList').closest('.board'));
   spin($('masterList'), masterRows.length, mi, ()=>{
     $('r1v').textContent=raw; $('r1b').textContent = bonus>0? ` +${bonus} → ${eff}` : '';
     lockTable(); nearMiss(eff,mi);
@@ -448,6 +453,7 @@ function nearMiss(eff,mi){ if(mi>=masterRows.length-1)return; if(excluded.has(mi
       `${gap===1?'One':'Two'} short of ${next.name}.`; } }
 function rollSub(m,eff,opts){
   const t=G.tables[m.table]; paintSub(m.table);
+  bringTo($('subList').closest('.board'));
   const r2=d100(); $('r2v').textContent='?';
   const ei=t.entries.findIndex(e=>e.min<=r2&&r2<=e.max), e=t.entries[ei];
   spin($('subList'), t.entries.length, ei, ()=>{ $('r2v').textContent=r2; resolve(m,t,e,eff,r2,opts); });
@@ -509,7 +515,7 @@ function showCard(m,t,e,r1,r2,opts){
     : `Roll 1 · d100 <b>${$('r1v').textContent}${$('r1b').textContent}</b> → ${t.name} &nbsp;·&nbsp; Roll 2 · d100 <b>${r2}</b> → ${e.name}`;
   res.innerHTML = cardHTML(e,t.name,opts.chained||null,opts.cursed) +
     `<div class="card rolls" style="border:none;background:none;box-shadow:none;padding:10px 6px 0">${rollline}</div>`;
-  res.classList.add('show'); }
+  res.classList.add('show'); bringTo(res,'start'); }
 function appendCard(e,tableName,badge){ const div=document.createElement('div'); div.className='bonuscard';
   div.innerHTML=cardHTML(e,tableName,badge); $('result').appendChild(div); }
 $('result').addEventListener('click',e=>{ const b=e.target.closest('.morelink'); if(!b)return;
