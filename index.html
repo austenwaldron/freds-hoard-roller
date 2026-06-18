@@ -209,6 +209,10 @@ footer{margin:24px auto 0;text-align:center;color:var(--ink-faint);font-size:12.
 .row.optin{border-left-color:var(--brass-hi);background:rgba(185,134,58,.09)}
 .row.optin .rng{color:var(--brass);font-weight:600}
 .row.optin .nm::after{content:" +";color:var(--brass-hi);font-weight:700}
+.sharechip{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.sharechip input{accent-color:var(--brass-hi);width:14px;height:14px;margin:0;cursor:pointer}
+.sharechip:has(input:checked){color:var(--brass-hi);border-color:var(--brass)}
+#hookBtn{padding:5px 9px;line-height:1}
 
 </style>
 </head>
@@ -236,6 +240,8 @@ footer{margin:24px auto 0;text-align:center;color:var(--ink-faint);font-size:12.
       <div class="stageChips">
         <button class="chip" id="sndBtn" aria-pressed="true">Sound on</button>
         <button class="chip" id="keyBtn" title="For keyboard users">Pry ↵</button>
+        <label class="chip sharechip" id="shareChip" title="Post each roll to your Discord channel"><input type="checkbox" id="shareCk"><span>Share to Discord</span></label>
+        <button class="chip" id="hookBtn" title="Set the Discord webhook URL" aria-label="Set Discord webhook URL">⚙</button>
       </div>
     </div>
   </div>
@@ -587,7 +593,7 @@ function resolve(m,t,e,r1,r2,opts){
   else if(!isEvent) reward(e.rarity);
   else tone(330,.2,'triangle',.12);
   showCard(m,t,e,r1,r2,opts);
-  if(!isEvent) addManifest(e,t,opts.cursed);
+  if(!isEvent){ addManifest(e,t,opts.cursed); shareToDiscord(e,t.name,opts); }
   // chained events
   if(e.name==='Lucky Escape'){ setTimeout(()=>beginRoll({flatBonus:10,chained:'Lucky Escape'}),1500); return; }
   if(e.name==='Cursed Prize'){ setTimeout(()=>beginRoll({cursed:true,chained:'Cursed Prize'}),1500); return; }
@@ -598,7 +604,9 @@ function pickFrom(tid){ const t=G.tables[tid],r=d100(); return t.entries.find(x=
 function doubleJackpot(){ const arts=G.tables.vault.entries.filter(x=>x.rarity==='Artifact');
   const a=arts[Math.floor(Math.random()*arts.length)], f=pickFrom('forbidden');
   vaultFanfare(); setTimeout(()=>{ appendCard(a,'The Vault','Artifact claimed'); addManifest(a,G.tables.vault);
-    appendCard(f,'The Forbidden Cache','Bonus prize'); addManifest(f,G.tables.forbidden); reward('Artifact'); },900); }
+    appendCard(f,'The Forbidden Cache','Bonus prize'); addManifest(f,G.tables.forbidden); reward('Artifact');
+    shareToDiscord(a,'The Vault',{rollLine:'DOUBLE JACKPOT — Artifact claimed'});
+    shareToDiscord(f,'The Forbidden Cache',{rollLine:'DOUBLE JACKPOT — Bonus prize'}); },900); }
 function noteFor(e){ const d=e.details||{},n=[];
   if(d.hp)n.push(`Restores ${d.hp} hit points.`);
   if(d.level)n.push(`${d.level}-level scroll · save DC ${d.dc} · attack ${d.attack}${d.concentration==='Yes'?' · concentration':''}`);
@@ -655,6 +663,38 @@ function paintManifest(){ const ul=$('manifest');
     Object.entries(cnt).map(([r,n])=>`<span style="color:${col(r)}"><b>${n}</b> ${r}</span>`).join(''); }
 $('clearBtn').addEventListener('click',()=>{ manifest.length=0; paintManifest(); });
 $('sndBtn').addEventListener('click',()=>{ soundOn=!soundOn; $('sndBtn').textContent=soundOn?'Sound on':'Sound off'; $('sndBtn').setAttribute('aria-pressed',soundOn); });
+
+/* ---------------- share to Discord ---------------- */
+const LS={get(k,d){try{return localStorage.getItem(k)??d;}catch(_){return d;}},set(k,v){try{localStorage.setItem(k,v);}catch(_){}}};
+const DEFAULT_WEBHOOK='https://discordapp.com/api/webhooks/1516986378674503831/ggEXw9Vip8IyoTm-Br6ymF5OT0kfhKZsUGW6S_X3Uz0TWjpy7U44SrkDUBItuoEt96rm';
+let WEBHOOK=LS.get('hoardWebhook', DEFAULT_WEBHOOK);
+let shareOn=LS.get('hoardShare','0')==='1';
+$('shareCk').checked=shareOn;
+$('shareCk').addEventListener('change',()=>{ shareOn=$('shareCk').checked; LS.set('hoardShare',shareOn?'1':'0');
+  if(shareOn) flashHint(WEBHOOK?'<b>Sharing rolls to Discord</b>':'No webhook set — tap ⚙ to add one.'); });
+$('hookBtn').addEventListener('click',()=>{ const v=prompt('Discord webhook URL (leave blank to clear):', WEBHOOK||'');
+  if(v===null)return; WEBHOOK=v.trim(); LS.set('hoardWebhook',WEBHOOK);
+  flashHint(WEBHOOK?'<b>Webhook saved</b>':'Webhook cleared.'); });
+function settingsSummary(){ const kinds=[!kindOn.consumable&&'consumables off',!kindOn.permanent&&'permanents off'].filter(Boolean);
+  const exc=masterRows.filter((m,i)=>excluded.has(i)).map(m=>m.name);
+  if(!activeTier) return ['Free roll (flat d100)',kinds.join(', '),exc.length?`excluded: ${exc.join(', ')}`:''].filter(Boolean).join(' · ');
+  const t=TIERS[activeTier]; const added=masterRows.filter((m,i)=>rowEnabled(i)&&!baseOn(i)).map(m=>m.name);
+  return [`${t.label} · ${t.lv}`,kinds.join(', '),added.length?`+added: ${added.join(', ')}`:'',exc.length?`excluded: ${exc.join(', ')}`:''].filter(Boolean).join(' · '); }
+function shareRollLine(e,tableName){ return `d100 ${$('r1v').textContent}${$('r1b').textContent} → ${tableName} · d100 ${$('r2v').textContent} → ${e.name}`; }
+function shareStatus(ok){ flashHint(ok?'<b>Shared to Discord</b> ✓':'Discord share failed — check the webhook (⚙).'); }
+function shareToDiscord(e,tableName,opts={}){ if(!shareOn||!WEBHOOK||opts.direct)return;
+  const rar=opts.cursed?'Cursed':(e.rarity||'—'); let hex='b9863a';
+  try{ const v=getComputedStyle(document.documentElement).getPropertyValue(RC[rar]||'--brass').trim(); if(v)hex=v.replace('#',''); }catch(_){}
+  const desc=[ (e.type&&e.type!=='Event')?`**${e.type}${e.subtype?` (${e.subtype})`:''}** · ${e.source}`:'', noteFor(e) ].filter(Boolean).join('\n');
+  const payload={ username:"Fred's Hoard",
+    embeds:[{ title:String(e.name).slice(0,256), url:e.link||undefined, description:desc?desc.slice(0,2000):undefined,
+      color:parseInt(hex,16)||0xb9863a, thumbnail:e.img?{url:e.img}:undefined,
+      fields:[ {name:'Rarity',value:String(rar),inline:true},{name:'Table',value:String(tableName),inline:true},
+               {name:'Roll',value:(opts.rollLine||shareRollLine(e,tableName)).slice(0,1024)},
+               {name:'Settings',value:(settingsSummary()||'—').slice(0,1024)} ],
+      timestamp:new Date().toISOString() }]};
+  fetch(WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(r=>shareStatus(r.ok)).catch(()=>shareStatus(false)); }
 
 refreshBoards();
 </script>
