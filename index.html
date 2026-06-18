@@ -184,6 +184,32 @@ footer{margin:24px auto 0;text-align:center;color:var(--ink-faint);font-size:12.
   .chest,.crowbar,.glow{transition:opacity .2s}
 }
 
+/* ---- tier of play + kind filters ---- */
+.tierbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;
+  padding:6px 2px 8px;border-bottom:1px solid rgba(124,103,67,.3);margin-bottom:4px}
+.tbgroup{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.tblabel{font-family:'Pirata One',cursive;font-size:14px;color:#5a3e1c;letter-spacing:.5px;margin-right:2px}
+.tbtn{display:flex;flex-direction:column;align-items:center;line-height:1;gap:2px;cursor:pointer;
+  background:rgba(90,60,25,.10);border:1px solid var(--brass);color:#6a4715;border-radius:9px;
+  padding:4px 9px;font-family:'Alegreya',serif;font-weight:600;font-size:14px;min-width:34px}
+.tbtn small{font-weight:400;font-size:9.5px;color:var(--ink-faint);letter-spacing:.2px}
+.tbtn:hover{background:rgba(185,134,58,.2)}
+.tbtn[aria-pressed="true"]{background:var(--brass);border-color:var(--brass-hi);color:#1f160f;box-shadow:0 0 0 1px var(--brass-hi) inset}
+.tbtn[aria-pressed="true"] small{color:#3a2b1a}
+.kbtn{cursor:pointer;background:rgba(90,60,25,.10);border:1px solid var(--brass);color:#6a4715;
+  border-radius:999px;padding:4px 11px;font-family:'Alegreya',serif;font-size:12.5px}
+.kbtn:hover{background:rgba(185,134,58,.2)}
+.kbtn[aria-pressed="false"]{opacity:.5;text-decoration:line-through;text-decoration-color:var(--r-cursed)}
+.tbtn:focus-visible,.kbtn:focus-visible{outline:2px solid var(--brass-hi);outline-offset:2px}
+.tiernote{padding:2px 4px 6px;font-size:11.5px;color:var(--ink-soft);display:flex;flex-wrap:wrap;gap:3px 9px;align-items:center}
+.tiernote b{color:#5a3e1c;font-weight:700}
+.row.off{opacity:.45}
+.row.off .nm{color:var(--ink-faint)}
+.row.off .rng{opacity:.6;font-style:italic}
+.row.optin{border-left-color:var(--brass-hi);background:rgba(185,134,58,.09)}
+.row.optin .rng{color:var(--brass);font-weight:600}
+.row.optin .nm::after{content:" +";color:var(--brass-hi);font-weight:700}
+
 </style>
 </head>
 <body>
@@ -218,6 +244,20 @@ footer{margin:24px auto 0;text-align:center;color:var(--ink-faint);font-size:12.
     <div class="clipContent">
       <div class="clipSection">
         <h2><span>Master Table</span><span class="die">d100 <b id="r1v">—</b><span id="r1b"></span></span></h2>
+        <div class="tierbar">
+          <div class="tbgroup" id="tierGroup" role="group" aria-label="Tier of play — sets rarity odds">
+            <span class="tblabel">Tier</span>
+            <button class="tbtn" data-tier="1" aria-pressed="false">1<small>Lv 1–4</small></button>
+            <button class="tbtn" data-tier="2" aria-pressed="false">2<small>Lv 5–10</small></button>
+            <button class="tbtn" data-tier="3" aria-pressed="false">3<small>Lv 11–16</small></button>
+            <button class="tbtn" data-tier="4" aria-pressed="false">4<small>Lv 17–20</small></button>
+          </div>
+          <div class="tbgroup" id="kindGroup" role="group" aria-label="Item kinds">
+            <button class="kbtn" data-kind="consumable" aria-pressed="true">Consumables</button>
+            <button class="kbtn" data-kind="permanent" aria-pressed="true">Permanents</button>
+          </div>
+        </div>
+        <div class="tiernote" id="tierNote" hidden></div>
         <div class="list" id="masterList"></div>
         <div class="tease" id="tease" hidden></div>
         <div class="boardhint" id="exNote">Tap a table to browse · tap the ● to keep players off it.</div>
@@ -300,9 +340,51 @@ function slam(){ tone(60,.25,'sine',.5,0,-25); }
 
 /* ---------------- boards ---------------- */
 const masterRows = G.master.map(m=>({...m, name:G.tables[m.table].name}));
+
+/* ---------------- tier of play + kind filters ---------------- */
+const TIERS = {
+  '1': {label:'Tier 1', lv:'Lv 1–4',   pct:{Common:54, Uncommon:37, Rare:9}},
+  '2': {label:'Tier 2', lv:'Lv 5–10',  pct:{Common:30, Uncommon:51, Rare:17, 'Very Rare':2}},
+  '3': {label:'Tier 3', lv:'Lv 11–16', pct:{Common:11, Uncommon:23, Rare:36, 'Very Rare':23, Legendary:7}},
+  '4': {label:'Tier 4', lv:'Lv 17–20', pct:{Rare:20, 'Very Rare':44, Legendary:36}},
+};
+const RARITY_ORDER=['Common','Uncommon','Rare','Very Rare','Legendary'];
+let activeTier=null;                                  // null or '1'..'4'
+const kindOn={consumable:true, permanent:true};
+const rowRarity=i=>G.tables[masterRows[i].table].rarity;
+const rowKind  =i=>G.tables[masterRows[i].table].kind;   // 'permanent' | 'consumable' | 'special'
+const rowWidth =i=>masterRows[i].max-masterRows[i].min+1;
+// The Vault is a special list, but counts as Legendary for tier purposes so it can surface
+// in any tier that rolls Legendary (Tier 3 & 4). It stays out of Common→Very-Rare-only tiers.
+const tierRarity=i=>masterRows[i].table==='vault' ? 'Legendary' : rowRarity(i);
+function kindBlocked(i){ const k=rowKind(i); if(k==='consumable')return !kindOn.consumable; if(k==='permanent')return !kindOn.permanent; return false; }
+function tierBlocked(i){ return activeTier ? !(tierRarity(i) in TIERS[activeTier].pct) : false; }
+// "base" = what the tier + kind filters allow by default. A DM can override a base-off list back ON
+// (opt-in) or a base-on list OFF (hand-exclude). Hand-exclude always wins.
+function baseOn(i){ return !kindBlocked(i) && !tierBlocked(i); }
+function rowEnabled(i){ if(excluded.has(i))return false; if(opted.has(i))return true; return baseOn(i); }
+function anyRollable(){ return masterRows.some((m,i)=>rowEnabled(i)); }
+/* roll weight for an enabled row under the active tier (in "percentage points") */
+function rollWeight(i){ const tr=tierRarity(i), pct=TIERS[activeTier].pct;
+  if(tr in pct){ let sum=0; masterRows.forEach((m,j)=>{ if(rowEnabled(j)&&tierRarity(j)===tr) sum+=rowWidth(j); });
+    return sum ? pct[tr]*(rowWidth(i)/sum) : 0; }
+  return rowWidth(i); /* opted-in list outside the tier: faint, sized to its natural d100 width */ }
+/* effective chance of landing on row i under the active tier + current filters (0..1) */
+function rowOdds(i){ if(!activeTier||!rowEnabled(i))return 0;
+  let total=0; masterRows.forEach((m,j)=>{ if(rowEnabled(j)) total+=rollWeight(j); });
+  return total ? rollWeight(i)/total : 0; }
+function fmtPct(p){ if(p<=0)return '—'; const v=p*100; return v<0.1?'<0.1%':(v<10?v.toFixed(1)+'%':Math.round(v)+'%'); }
+
 function paintMaster(){ $('masterList').innerHTML = masterRows.map((m,i)=>{
-  const rng = m.min===m.max? String(m.min).padStart(2,'0') : `${String(m.min).padStart(2,'0')}–${String(m.max).padStart(2,'0')}`;
-  return `<div class="row pick" data-i="${i}"><span class="rng">${rng}</span><span class="nm">${m.name}</span><span class="tag" style="color:${col(bandRarity(m))}">${m.band}</span><button class="extog" data-ex="${i}" aria-pressed="false" title="Included. Click to exclude from random pulls." aria-label="Toggle whether players can randomly land on ${m.name}">●</button></div>`;
+  const ex=excluded.has(i), on=rowEnabled(i), optin=on&&!baseOn(i), blocked=!on&&!ex;
+  const cell = activeTier ? (on?fmtPct(rowOdds(i)):'—')
+    : (m.min===m.max? String(m.min).padStart(2,'0') : `${String(m.min).padStart(2,'0')}–${String(m.max).padStart(2,'0')}`);
+  const tip = ex ? 'Excluded — players cannot land here. Click to include.'
+    : optin ? `Added beyond ${activeTier?TIERS[activeTier].label:'the filters'} — players can land here. Click to remove.`
+    : tierBlocked(i) ? `Not part of ${TIERS[activeTier].label}. Click to add it anyway.`
+    : kindBlocked(i) ? `${rowKind(i)==='consumable'?'Consumables':'Permanents'} are toggled off. Click to add this one.`
+    : 'Included. Click to exclude from random pulls.';
+  return `<div class="row pick${ex?' ex':''}${blocked?' off':''}${optin?' optin':''}" data-i="${i}"><span class="rng">${cell}</span><span class="nm">${m.name}</span><span class="tag" style="color:${col(bandRarity(m))}">${m.band}</span><button class="extog" data-ex="${i}" aria-pressed="${ex?'true':'false'}" title="${tip}" aria-label="Toggle whether players can randomly land on ${m.name}">${ex?'✕':'●'}</button></div>`;
 }).join(''); }
 function bandRarity(m){ const r=G.tables[m.table].rarity; return r; }
 function paintSub(tid){ const t=G.tables[tid]; $('subTitle').textContent=t.name;
@@ -349,7 +431,7 @@ function flashHint(msg){ const h=$('hint'); if(h._t)clearTimeout(h._t); if(h._pr
   h.innerHTML=msg; h.style.color='var(--ember)'; h.style.opacity='1';
   h._t=setTimeout(()=>{ h.innerHTML=h._prev; h._prev=null; h.style.color=''; },2400); }
 function fire(){
-  if(excluded.size>=masterRows.length){ flashHint('Every table is excluded — include at least one to roll.');
+  if(!anyRollable()){ flashHint('No tables are active — adjust the tier or filters to roll.');
     barG.classList.add('spring'); setAngle(0); setTimeout(()=>barG.classList.remove('spring'),420); return; }
   busy=true; chestIsOpen=true; scene.classList.add('busy'); pop();
   barG.classList.add('spring'); setAngle(0); setTimeout(()=>barG.classList.remove('spring'),420);
@@ -360,7 +442,7 @@ function fire(){
   barG.style.opacity='0';
   glowEl.classList.add('on');
   setTimeout(()=>chestWrap.classList.remove('pop'),620);
-  burst(); setTimeout(()=>startRoll(),reduceMotion?150:600); }
+  burst(); setTimeout(()=>beginRoll(),reduceMotion?150:600); }
 function closeChest(){ if(!chestIsOpen){ busy=false; scene.classList.remove('busy'); return; } chestIsOpen=false;
   chestOpen.style.opacity='0'; lidOpen.style.opacity='0';
   chestClosed.style.opacity='1'; lidLeft.style.opacity='1';
@@ -375,41 +457,49 @@ function burst(){ if(reduceMotion)return; const box=scene.getBoundingClientRect(
 
 /* ---------------- investigate mode ---------------- */
 let browseTid=null;
-const excluded=new Set();
+const excluded=new Set();   // hand-excluded (hard off)
+const opted=new Set();      // hand-added beyond the tier/kind filters (hard on)
+function refreshBoards(){ paintMaster(); updateExcludeNote(); updateTierNote(); }
 $('masterList').addEventListener('click',e=>{ if(busy)return;
   const tog=e.target.closest('.extog');
-  if(tog){ e.stopPropagation(); ac(); toggleExclude(+tog.dataset.ex); return; }
+  if(tog){ e.stopPropagation(); ac(); toggleRow(+tog.dataset.ex); return; }
   const r=e.target.closest('.row'); if(!r)return; ac(); browse(+r.dataset.i); });
-function toggleExclude(i){ const row=$('masterList').querySelector(`.row[data-i="${i}"]`); if(!row)return;
-  const off = !excluded.has(i); off?excluded.add(i):excluded.delete(i);
-  row.classList.toggle('ex', off);
-  const b=row.querySelector('.extog'); b.setAttribute('aria-pressed', off?'true':'false');
-  b.textContent = off?'✕':'●';
-  b.title = off?'Excluded — players cannot land here. Click to include.':'Included. Click to exclude from random pulls.';
-  tone(off?300:540,.05,'triangle',.05); updateExcludeNote();
-}
+function toggleRow(i){ const on=rowEnabled(i);
+  if(on){ opted.delete(i); if(baseOn(i)) excluded.add(i); tone(300,.05,'triangle',.05); }
+  else { excluded.delete(i); if(!baseOn(i)) opted.add(i); tone(540,.05,'triangle',.05); }
+  refreshBoards(); }
 function updateExcludeNote(){ const n=excluded.size, total=masterRows.length;
   const allBtn = n<total ? `<button class="reslink" id="exAll">exclude all</button>` : '';
-  const resetBtn = n>0 ? `<button class="reslink" id="exReset">reset</button>` : '';
+  const resetBtn = (n>0||opted.size>0) ? `<button class="reslink" id="exReset">reset</button>` : '';
   const sep = (allBtn&&resetBtn) ? ' · ' : '';
   const lead = n
-    ? `<b style="color:var(--ember)">${n}</b> table${n>1?'s':''} excluded from random pulls — `
+    ? `<b style="color:var(--ember)">${n}</b> table${n>1?'s':''} excluded by hand — `
     : 'Tap a table to browse it · tap the ● at a row’s right to keep players from landing there. ';
   $('exNote').innerHTML = lead + resetBtn + sep + allBtn + (n?'.':''); }
-function includeAll(){ excluded.clear();
-  $('masterList').querySelectorAll('.row.ex').forEach(r=>{ r.classList.remove('ex');
-    const b=r.querySelector('.extog'); b.setAttribute('aria-pressed','false'); b.textContent='●';
-    b.title='Included. Click to exclude from random pulls.'; });
-  updateExcludeNote(); }
-function excludeAll(){ masterRows.forEach((m,i)=>excluded.add(i));
-  $('masterList').querySelectorAll('.row').forEach(r=>{ r.classList.add('ex');
-    const b=r.querySelector('.extog'); b.setAttribute('aria-pressed','true'); b.textContent='✕';
-    b.title='Excluded — players cannot land here. Click to include.'; });
-  updateExcludeNote(); }
+function updateTierNote(){ const el=$('tierNote'); if(!el)return;
+  if(!activeTier){ el.hidden=true; el.innerHTML=''; return; }
+  el.hidden=false; const t=TIERS[activeTier];
+  const parts=RARITY_ORDER.filter(r=>t.pct[r]).map(r=>{
+    const live=masterRows.some((m,i)=>rowEnabled(i)&&tierRarity(i)===r);
+    return `<span style="color:${col(r)}${live?'':';opacity:.5;text-decoration:line-through'}">${r} ${t.pct[r]}%</span>`; });
+  const offk=[]; if(!kindOn.consumable)offk.push('consumables off'); if(!kindOn.permanent)offk.push('permanents off');
+  const added=masterRows.filter((m,i)=>rowEnabled(i)&&!baseOn(i)).map((m,_,)=>m.name);
+  const extra = added.length ? ` <i style="color:var(--brass)">+ added: ${added.join(', ')}</i>` : '';
+  el.innerHTML = `<b>${t.label} · ${t.lv}</b> — ${parts.join(' · ')}${offk.length?` <i>(${offk.join(', ')})</i>`:''}${extra}`; }
+function includeAll(){ excluded.clear(); opted.clear(); refreshBoards(); }
+function excludeAll(){ opted.clear(); masterRows.forEach((m,i)=>excluded.add(i)); refreshBoards(); }
 $('exNote').addEventListener('click',e=>{ if(busy)return;
   if(e.target.id==='exReset'){ ac(); includeAll(); tone(540,.05,'triangle',.05); }
   else if(e.target.id==='exAll'){ ac(); excludeAll(); tone(300,.05,'triangle',.05); }
 });
+$('tierGroup').addEventListener('click',e=>{ if(busy)return; const b=e.target.closest('.tbtn'); if(!b)return; ac();
+  const n=b.dataset.tier; activeTier = activeTier===n ? null : n;
+  document.querySelectorAll('#tierGroup .tbtn').forEach(x=>x.setAttribute('aria-pressed', x.dataset.tier===activeTier?'true':'false'));
+  $('r1v').textContent='—'; $('r1b').textContent='';
+  tone(activeTier?620:420,.06,'triangle',.06); refreshBoards(); });
+$('kindGroup').addEventListener('click',e=>{ if(busy)return; const b=e.target.closest('.kbtn'); if(!b)return; ac();
+  const k=b.dataset.kind; kindOn[k]=!kindOn[k]; b.setAttribute('aria-pressed', kindOn[k]?'true':'false');
+  tone(kindOn[k]?540:300,.05,'triangle',.05); refreshBoards(); });
 function browse(mi){ const m=masterRows[mi]; browseTid=m.table;
   $('masterList').querySelectorAll('.row').forEach(x=>x.classList.remove('sel','hot','locked'));
   $('masterList').querySelector(`.row[data-i="${mi}"]`).classList.add('sel');
@@ -435,15 +525,37 @@ function directRoll(tid){ busy=true; scene.classList.add('busy');
 
 /* ---------------- roll flow ---------------- */
 const manifest=[];
+function beginRoll(opts={}){ if(activeTier) startRollTier(opts); else startRoll(opts); }
+function startRollTier(opts={}){
+  clearMarks($('masterList')); $('tease').hidden=true; $('result').classList.remove('show');
+  $('subList').innerHTML='<div class="placeholder">…</div>'; $('subTitle').textContent='Sub-table'; $('r2v').textContent='—';
+  // Single weighted draw across every live list. In-tier lists carry their share of the DMG
+  // percentages; opted-in out-of-tier lists carry their natural d100 width as a faint chance.
+  // Lists stay in master order (Common→Legendary→Vault), so a low d100 = common, a high one = rare.
+  const items=[]; let total=0;
+  masterRows.forEach((m,i)=>{ if(rowEnabled(i)){ const w=rollWeight(i); if(w>0){ items.push({i,w}); total+=w; } } });
+  const roll=d100();
+  let target=(roll/100)*total, acc=0, mi=items[items.length-1].i;
+  for(const it of items){ acc+=it.w; if(target<=acc){ mi=it.i; break; } }
+  const m=masterRows[mi];
+  browseTid=null; $('subRollBtn').hidden=true; $('r1v').textContent='?'; $('r1b').textContent='';
+  $('masterList').querySelectorAll('.row.sel').forEach(x=>x.classList.remove('sel'));
+  bringTo(document.querySelector('.tables .clipSection'),'start');
+  spin($('masterList'), masterRows.length, mi, ()=>{
+    $('r1v').textContent=roll; $('r1b').textContent=` → ${rowRarity(mi)}`;
+    lockTable();
+    setTimeout(()=>rollSub(m,roll,opts), reduceMotion?150:450);
+  });
+}
 function startRoll(opts={}){
   clearMarks($('masterList')); $('tease').hidden=true; $('result').classList.remove('show');
   $('subList').innerHTML='<div class="placeholder">…</div>'; $('subTitle').textContent='Sub-table'; $('r2v').textContent='—';
-  const allEx = excluded.size>=masterRows.length;
+  const allEx = !anyRollable();
   let raw,bonus,eff,mi,tries=0;
   do{ raw=d100(); bonus=opts.flatBonus!=null?opts.flatBonus:0;
       eff = bonus>0 ? Math.min(99, raw+bonus) : raw; // flat bonus (Lucky Escape) never reaches the Vault
       mi=masterRows.findIndex(m=>m.min<=eff&&eff<=m.max);
-  } while(!allEx && excluded.has(mi) && ++tries<800);
+  } while(!allEx && !rowEnabled(mi) && ++tries<800);
   const m=masterRows[mi];
   $('r1v').textContent='?'; $('r1b').textContent='';
   browseTid=null; $('subRollBtn').hidden=true;
@@ -455,7 +567,7 @@ function startRoll(opts={}){
     setTimeout(()=>rollSub(m,eff,opts), reduceMotion?150:450);
   });
 }
-function nearMiss(eff,mi){ if(mi>=masterRows.length-1)return; if(excluded.has(mi+1))return;
+function nearMiss(eff,mi){ if(mi>=masterRows.length-1)return; if(!rowEnabled(mi+1))return;
   const next=masterRows[mi+1], gap=next.min-eff;
   if(gap>0&&gap<=2){ const t=$('tease'); t.hidden=false;
     t.textContent = next.table==='vault' ? `${gap===1?'One':'Two'} away from THE VAULT. It heard you knocking.` :
@@ -477,8 +589,8 @@ function resolve(m,t,e,r1,r2,opts){
   showCard(m,t,e,r1,r2,opts);
   if(!isEvent) addManifest(e,t,opts.cursed);
   // chained events
-  if(e.name==='Lucky Escape'){ setTimeout(()=>startRoll({flatBonus:10,chained:'Lucky Escape'}),1500); return; }
-  if(e.name==='Cursed Prize'){ setTimeout(()=>startRoll({cursed:true,chained:'Cursed Prize'}),1500); return; }
+  if(e.name==='Lucky Escape'){ setTimeout(()=>beginRoll({flatBonus:10,chained:'Lucky Escape'}),1500); return; }
+  if(e.name==='Cursed Prize'){ setTimeout(()=>beginRoll({cursed:true,chained:'Cursed Prize'}),1500); return; }
   if(e.name==='DOUBLE JACKPOT'){ doubleJackpot(); }
   setTimeout(closeChest, reduceMotion?400:1900);
 }
@@ -544,7 +656,7 @@ function paintManifest(){ const ul=$('manifest');
 $('clearBtn').addEventListener('click',()=>{ manifest.length=0; paintManifest(); });
 $('sndBtn').addEventListener('click',()=>{ soundOn=!soundOn; $('sndBtn').textContent=soundOn?'Sound on':'Sound off'; $('sndBtn').setAttribute('aria-pressed',soundOn); });
 
-paintMaster(); updateExcludeNote();
+refreshBoards();
 </script>
 </body>
 </html>
