@@ -240,8 +240,8 @@ footer{margin:24px auto 0;text-align:center;color:var(--ink-faint);font-size:12.
       <div class="stageChips">
         <button class="chip" id="sndBtn" aria-pressed="true">Sound on</button>
         <button class="chip" id="keyBtn" title="For keyboard users">Pry ↵</button>
-        <label class="chip sharechip" id="shareChip" title="Post each roll to your Discord channel"><input type="checkbox" id="shareCk"><span>Share to Discord</span></label>
-        <button class="chip" id="hookBtn" title="Set the Discord webhook URL" aria-label="Set Discord webhook URL">⚙</button>
+        <label class="chip sharechip" id="shareChip" title="Post each roll to Discord (you'll paste a webhook each session)"><input type="checkbox" id="shareCk"><span>Share to Discord</span></label>
+        <button class="chip" id="hookBtn" title="Set the Discord webhook URL for this session (not saved)" aria-label="Set Discord webhook URL">⚙</button>
       </div>
     </div>
   </div>
@@ -665,16 +665,20 @@ $('clearBtn').addEventListener('click',()=>{ manifest.length=0; paintManifest();
 $('sndBtn').addEventListener('click',()=>{ soundOn=!soundOn; $('sndBtn').textContent=soundOn?'Sound on':'Sound off'; $('sndBtn').setAttribute('aria-pressed',soundOn); });
 
 /* ---------------- share to Discord ---------------- */
-const LS={get(k,d){try{return localStorage.getItem(k)??d;}catch(_){return d;}},set(k,v){try{localStorage.setItem(k,v);}catch(_){}}};
-const DEFAULT_WEBHOOK='https://discordapp.com/api/webhooks/1516986378674503831/ggEXw9Vip8IyoTm-Br6ymF5OT0kfhKZsUGW6S_X3Uz0TWjpy7U44SrkDUBItuoEt96rm';
-let WEBHOOK=LS.get('hoardWebhook', DEFAULT_WEBHOOK);
-let shareOn=LS.get('hoardShare','0')==='1';
-$('shareCk').checked=shareOn;
-$('shareCk').addEventListener('change',()=>{ shareOn=$('shareCk').checked; LS.set('hoardShare',shareOn?'1':'0');
-  if(shareOn) flashHint(WEBHOOK?'<b>Sharing rolls to Discord</b>':'No webhook set — tap ⚙ to add one.'); });
-$('hookBtn').addEventListener('click',()=>{ const v=prompt('Discord webhook URL (leave blank to clear):', WEBHOOK||'');
-  if(v===null)return; WEBHOOK=v.trim(); LS.set('hoardWebhook',WEBHOOK);
-  flashHint(WEBHOOK?'<b>Webhook saved</b>':'Webhook cleared.'); });
+let WEBHOOK='';        // session only — entered each load, never embedded in the file or saved to storage
+let shareOn=false;
+function promptWebhook(){ const v=prompt('Paste your Discord webhook URL (for this session only — not saved):', WEBHOOK||'');
+  if(v===null) return false; WEBHOOK=v.trim(); return true; }
+$('shareCk').addEventListener('change',()=>{
+  if($('shareCk').checked){
+    if(!WEBHOOK) promptWebhook();
+    if(!WEBHOOK){ $('shareCk').checked=false; shareOn=false; flashHint('Add a webhook to share — tap ⚙ or the checkbox.'); return; }
+    shareOn=true; flashHint('<b>Sharing rolls to Discord</b> for this session.');
+  } else shareOn=false;
+});
+$('hookBtn').addEventListener('click',()=>{ if(!promptWebhook())return;
+  if(WEBHOOK) flashHint('<b>Webhook set</b> for this session.');
+  else { flashHint('Webhook cleared.'); if($('shareCk').checked){ $('shareCk').checked=false; shareOn=false; } } });
 function settingsSummary(){ const kinds=[!kindOn.consumable&&'consumables off',!kindOn.permanent&&'permanents off'].filter(Boolean);
   const exc=masterRows.filter((m,i)=>excluded.has(i)).map(m=>m.name);
   if(!activeTier) return ['Free roll (flat d100)',kinds.join(', '),exc.length?`excluded: ${exc.join(', ')}`:''].filter(Boolean).join(' · ');
